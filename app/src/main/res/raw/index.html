@@ -29,7 +29,13 @@
             margin-bottom: .5rem;
         }
 
-        input {
+        textarea {
+            resize: none;
+            overflow: auto;
+            vertical-align: bottom;
+        }
+
+        input, textarea {
             color: #1a1a1a;
         }
 
@@ -37,64 +43,112 @@
             color: #EEEEEE;
         }
 
-        input[type="text"] {
-            width: 20rem;
-        }
-
-        input {
-            padding: 10px;
+        input, textarea {
+            padding: .6rem;
             border: none;
             border-radius: 4px;
             transition: box-shadow 0.3s ease-in-out;
+            vertical-align: bottom;
         }
 
-        input:focus {
+        input:focus, textarea:focus {
             outline: none;
             border-color: #66afe9;
             box-shadow: 0 0 10px rgba(102, 175, 233, 0.6);
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+        }
+
+        input[type="text"], textarea {
+            flex: 1;
+            box-sizing: border-box;
+        }
+
+        input[type="text"], input[type="file"], input[type="button"] {
+            height: 2.6rem;
+        }
+
+        input[type="button"] {
+            margin-left: .6rem;
+        }
+
+        input[readonly] {
+            background-color: grey;
+        }
+
+        .history {
+            margin-top: 10px;
+        }
+
+        .history > input[type="text"] {
+            color: #EEEEEE;
         }
     </style>
 </head>
 <body>
 <h1 class="title">我的電視·〇</h1>
-
+<h4>視頻源可以设置為地址/文本/文件其中之一</h4>
 <hr/>
 
 <div class="item">
-    <label for="uri" id="uri-label">視頻源地址，點擊確認後保存</label>
-    <input type="text" id="uri"/>
-    <input type="button" id="confirm-uri" value="確認" class="confirm"/>
+    <label for="uri" id="uri-label">視頻源地址</label>
+    <div class="container">
+        <input type="text" id="uri"/>
+        <input type="button" id="confirm-uri" value="新增" class="insert"/>
+    </div>
+    <div id="source"></div>
 </div>
 
 <hr/>
 
 <div class="item">
-    <label for="upload-file" id="upload-file-label">選擇視頻文件後會自動保存上傳</label>
-    <input type="file" id="upload-file" multiple/>
+    <label for="plain-text" id="plain-text-label">視頻源文本</label>
+    <div class="container">
+        <textarea id="plain-text" rows="4"/></textarea>
+        <input type="button" id="confirm-plain-text" value="確認" class="confirm"/>
+    </div>
 </div>
 
 <hr/>
 
 <div class="item">
-    <label for="channel" id="channel-label">默認播放頻道號，從1開始。0代表沒有設置</label>
-    <input type="text" id="channel"/>
-    <input type="button" id="confirm-channel" value="確認" class="confirm"/>
+    <label for="upload-file" id="upload-file-label">視頻源文件，選擇後會自動上傳保存</label>
+    <div class="container">
+        <input type="file" id="upload-file" multiple/>
+    </div>
+</div>
+
+<hr/>
+
+<div class="item">
+    <label for="channel" id="channel-label">默認播放頻道號，從1開始。0代表默認設置</label>
+    <div class="container">
+        <input type="text" id="channel"/>
+        <input type="button" id="confirm-channel" value="確認" class="confirm"/>
+    </div>
 </div>
 
 <hr/>
 
 <div class="item">
     <label for="proxy" id="epg-label">EPG</label>
-    <input type="text" id="epg"/>
-    <input type="button" id="confirm-epg" value="確認" class="confirm"/>
+    <div class="container">
+        <input type="text" id="epg"/>
+        <input type="button" id="confirm-epg" value="確認" class="confirm"/>
+    </div>
 </div>
 
 <hr/>
 
 <div class="item">
     <label for="proxy" id="proxy-label">代理地址</label>
-    <input type="text" id="proxy"/>
-    <input type="button" id="confirm-proxy" value="確認" class="confirm"/>
+    <div class="container">
+        <input type="text" id="proxy"/>
+        <input type="button" id="confirm-proxy" value="確認" class="confirm"/>
+    </div>
 </div>
 
 <hr/>
@@ -103,35 +157,49 @@
     const lang = {
         TRADITIONAL_CHINESE: {
             appName: '我的電視·〇',
+            description: '視頻源可以设置為地址/文本/文件其中之一',
             uriLabel: '視頻源地址',
-            uploadFileLabel: '選擇視頻源文件後會自動上傳保存',
-            channelLabel: '默認播放頻道，從1開始。0代表沒有設置',
+            plainTextLabel: '視頻源文本',
+            uploadFileLabel: '視頻源文件，選擇後會自動上傳保存',
+            channelLabel: '默認播放頻道，從1開始。0代表默认設置',
             epgLabel: 'EPG',
             proxyLabel: '代理地址',
             confirm: '確認',
+            remove: '刪除',
+            insert: '新增',
         },
         SIMPLIFIED_CHINESE: {
             appName: '我的电视·〇',
+            description: '视频源可以设置为地址/文本/文件其中之一',
             uriLabel: '视频源地址',
-            uploadFileLabel: '选择视频源文件后会自动上传保存',
-            channelLabel: '默认播放频道，从1开始。0代表沒有设置',
+            plainTextLabel: '视频源文本',
+            uploadFileLabel: '视频源文件，选择后会自动上传保存',
+            channelLabel: '默认播放频道，从1开始。0代表默認设置',
             epgLabel: 'EPG',
             proxyLabel: '代理地址',
             confirm: '确认',
+            remove: '删除',
+            insert: '新增',
         }
     };
     const t = (key) => lang['TRADITIONAL_CHINESE'][key];
-    document.querySelector('title').innerText = t('appName');
     document.querySelector('h1').innerText = t('appName');
-    document.querySelector('title').innerText = t('appName');
-    document.querySelector('#channel-label').innerText = t('channelLabel');
-    document.querySelector('#upload-file-label').innerText = t('uploadFileLabel');
+    document.querySelector('h4').innerText = t('description');
     document.querySelector('#uri-label').innerText = t('uriLabel');
+    document.querySelector('#plain-text-label').innerText = t('plainTextLabel');
+    document.querySelector('#upload-file-label').innerText = t('uploadFileLabel');
+    document.querySelector('#channel-label').innerText = t('channelLabel');
     document.querySelector('#epg-label').innerText = t('epgLabel');
     document.querySelector('#proxy-label').innerText = t('proxyLabel');
+    document.querySelector('#confirm-uri').innerText = t('insert');
     document.querySelectorAll('.confirm').forEach(
         i => i.value = t('confirm')
     );
+    document.querySelectorAll('.insert').forEach(
+        i => i.value = t('insert')
+    );
+
+    const source = document.querySelector('#source');
 
     const uploadFile = document.querySelector('#upload-file');
 
@@ -156,9 +224,29 @@
     document.querySelector('#confirm-uri').onclick = () => {
         const uri = document.querySelector('#uri').value.trim();
         if (uri.length > 0) {
+            const uuid = uuidV4()
             save('/api/uri', JSON.stringify({
-                uri: uri
+                id: uuid,
+                uri: uri,
             }))
+
+            let htmlString = `<div class="container history"><input type="text" readonly value="${uri}" /><input type="button" value="删除" class="remove" data-source-id="${uuid}"/></div>`;
+            let doc = new DOMParser().parseFromString(htmlString, 'text/html');
+            const firstChild = source.firstChild;
+            if (firstChild) {
+                source.insertBefore(doc.body.firstChild, firstChild);
+            } else {
+                source.appendChild(doc.body.firstChild);
+            }
+
+            handleRemove()
+        }
+    }
+
+    document.querySelector('#confirm-plain-text').onclick = () => {
+        const content = document.querySelector('#plain-text').value.trim();
+        if (content.length > 0) {
+            save('/api/channels', content)
         }
     }
 
@@ -173,21 +261,18 @@
 
     document.querySelector('#confirm-proxy').onclick = () => {
         const proxy = document.querySelector('#proxy').value.trim();
-        if (proxy.length > 0) {
-            save('/api/proxy', JSON.stringify({
-                proxy: proxy
-            }))
-        }
+        save('/api/proxy', JSON.stringify({
+            proxy: proxy
+        }))
     }
 
     document.querySelector('#confirm-epg').onclick = () => {
         const epg = document.querySelector('#epg').value.trim();
-        if (epg.length > 0) {
-            save('/api/epg', JSON.stringify({
-                epg: epg
-            }))
-        }
+        save('/api/epg', JSON.stringify({
+            epg: epg
+        }))
     }
+
     const save = async (url, body) => {
         const response = await fetch(url, {
             method: 'POST',
@@ -197,14 +282,44 @@
         console.log(json);
     }
 
+    const handleRemove = () => {
+        const removes = document.querySelectorAll('.remove');
+        [...removes].forEach(remove => {
+            remove.value = t('remove');
+            remove.onclick = () => {
+                const sourceId = remove.dataset.sourceId.trim();
+                console.log('sourceId', sourceId);
+                save('/api/remove-source', JSON.stringify({
+                    sourceId: sourceId
+                }))
+                remove.parentElement.remove()
+            }
+        })
+    }
+
+    const uuidV4 = () => {
+        return ([1e7] + '-' + 1e3 + '-' + 4e3 + '-' + 8e3 + '-' + 1e11).replace(/[018]/g, c =>
+            (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+        );
+    }
+
     (async () => {
         const response = await fetch('/api/settings');
         const json = await response.json();
         console.log(json);
         document.querySelector('#channel').value = json.channelDefault;
         document.querySelector('#uri').value = json.channelUri;
+        document.querySelector('#plain-text').value = json.channelText;
         document.querySelector('#epg').value = json.epg;
         document.querySelector('#proxy').value = json.proxy;
+
+        json.history.forEach(v => {
+            let htmlString = `<div class="container history"><input type="text" readonly value="${v.uri}" /><input type="button" value="删除" class="remove" data-source-id="${v.id}"/></div>`;
+            let doc = new DOMParser().parseFromString(htmlString, 'text/html');
+            source.appendChild(doc.body.firstChild);
+        })
+
+        handleRemove()
     })()
 </script>
 </html>

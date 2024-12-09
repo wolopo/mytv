@@ -1,13 +1,14 @@
 package com.lizongying.mytv0
 
 import MainViewModel
-import MainViewModel.Companion.FILE_NAME
+import MainViewModel.Companion.CACHE_FILE_NAME
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +22,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.lizongying.mytv0.ModalFragment.Companion.KEY_BITMAP
 import com.lizongying.mytv0.ModalFragment.Companion.KEY_TEXT
 import com.lizongying.mytv0.SimpleServer.Companion.PORT
+import com.lizongying.mytv0.Utils.getDateTimestamp
 import com.lizongying.mytv0.databinding.SettingBinding
 import kotlin.math.max
 import kotlin.math.min
@@ -119,7 +121,7 @@ class SettingFragment : Fragment() {
         binding.qrcode.setOnClickListener {
             val imageModalFragment = ModalFragment()
             val size = Utils.dpToPx(200)
-            val img = QrCodeUtil().createQRCodeBitmap(server, size, size)
+            val img = QrCodeUtil().createQRCodeBitmap("$server?${getDateTimestamp()}", size, size)
             val args = Bundle()
             args.putString(KEY_TEXT, server.removePrefix("http://"))
             args.putParcelable(KEY_BITMAP, img)
@@ -135,7 +137,10 @@ class SettingFragment : Fragment() {
         }
 
         binding.confirmConfig.setOnClickListener {
-            confirmConfig()
+            val sourcesFragment = SourcesFragment()
+
+            sourcesFragment.show(requireFragmentManager(), SourcesFragment.TAG)
+            mainActivity.settingActive()
         }
 
         binding.appreciate.setOnClickListener {
@@ -274,6 +279,7 @@ class SettingFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
         val context = requireActivity()
         val mainActivity = (activity as MainActivity)
         viewModel = ViewModelProvider(context)[MainViewModel::class.java]
@@ -285,29 +291,44 @@ class SettingFragment : Fragment() {
         binding.clear.setOnClickListener {
             SP.channelNum = SP.DEFAULT_CHANNEL_NUM
 
-            SP.positionGroup = SP.DEFAULT_POSITION_GROUP
-            viewModel.groupModel.setPosition(SP.DEFAULT_POSITION_GROUP)
-            viewModel.groupModel.setPositionPlaying(SP.DEFAULT_POSITION_GROUP)
+            SP.sources = SP.DEFAULT_SOURCES
+            SP.channelReversal = SP.DEFAULT_CHANNEL_REVERSAL
+            SP.time = SP.DEFAULT_TIME
+            SP.bootStartup = SP.DEFAULT_BOOT_STARTUP
+            SP.repeatInfo = SP.DEFAULT_REPEAT_INFO
+            SP.configAutoLoad = SP.DEFAULT_CONFIG_AUTO_LOAD
+            SP.proxy = SP.DEFAULT_PROXY
 
-            SP.position = SP.DEFAULT_POSITION
-            val tvListModel = viewModel.groupModel.getCurrentList()
-            tvListModel?.setPosition(SP.DEFAULT_POSITION)
-            tvListModel?.setPositionPlaying(SP.DEFAULT_POSITION)
-
-            SP.config = SP.DEFAULT_CONFIG_URL
+            SP.configUrl = SP.DEFAULT_CONFIG_URL
+            Log.i(TAG, "config url: ${SP.configUrl}")
+            context.deleteFile(CACHE_FILE_NAME)
             viewModel.reset(context)
             confirmConfig()
 
             SP.channel = SP.DEFAULT_CHANNEL
+            Log.i(TAG, "default channel: ${SP.channel}")
             confirmChannel()
 
-            context.deleteFile(FILE_NAME)
             SP.deleteLike()
-            SP.position = 0
-            val tvModel = viewModel.groupModel.getPosition(0)
-            tvModel?.setReady()
+            Log.i(TAG, "clear like")
+
+//            SP.positionGroup = SP.DEFAULT_POSITION_GROUP
+//            viewModel.groupModel.setPosition(SP.DEFAULT_POSITION_GROUP)
+//            viewModel.groupModel.setPositionPlaying(SP.DEFAULT_POSITION_GROUP)
+
+            SP.positionGroup = viewModel.groupModel.defaultPosition()
+            viewModel.groupModel.initPosition()
+
+            SP.position = SP.DEFAULT_POSITION
+            Log.i(TAG, "list position: ${SP.position}")
+            val tvListModel = viewModel.groupModel.getCurrentList()
+            tvListModel?.setPosition(SP.DEFAULT_POSITION)
+            tvListModel?.setPositionPlaying(SP.DEFAULT_POSITION)
+
             viewModel.groupModel.setPlaying()
             viewModel.groupModel.getCurrentList()?.setPlaying()
+            viewModel.groupModel.getCurrent()?.setReady()
+
             SP.showAllChannels = SP.DEFAULT_SHOW_ALL_CHANNELS
             SP.compactMenu = SP.DEFAULT_COMPACT_MENU
 
@@ -328,13 +349,12 @@ class SettingFragment : Fragment() {
     }
 
     private fun confirmConfig() {
-        if (SP.config == null) {
+        if (SP.configUrl.isNullOrEmpty()) {
+            Log.w(TAG, "SP.configUrl is null or empty")
             return
         }
 
-        var url = SP.config!!
-        url = Utils.formatUrl(url)
-        uri = Uri.parse(url)
+        uri = Uri.parse(Utils.formatUrl(SP.configUrl!!))
         if (uri.scheme == "") {
             uri = uri.buildUpon().scheme("http").build()
         }
@@ -342,7 +362,7 @@ class SettingFragment : Fragment() {
             if (uri.scheme == "file") {
                 requestReadPermissions()
             } else {
-                viewModel.parseUri(uri)
+                viewModel.importFromUri(uri)
             }
         } else {
             R.string.invalid_config_address.showToast()
@@ -366,7 +386,8 @@ class SettingFragment : Fragment() {
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
-        if (!hidden) {
+        if (_binding != null && !hidden) {
+            binding.qrcode.requestFocus()
         }
     }
 
@@ -427,7 +448,7 @@ class SettingFragment : Fragment() {
                 PERMISSIONS_REQUEST_CODE
             )
         } else {
-            viewModel.parseUri(uri)
+            viewModel.importFromUri(uri)
         }
     }
 
@@ -439,7 +460,7 @@ class SettingFragment : Fragment() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_READ_EXTERNAL_STORAGE_REQUEST_CODE) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                viewModel.parseUri(uri)
+                viewModel.importFromUri(uri)
             } else {
                 R.string.authorization_failed.showToast()
             }

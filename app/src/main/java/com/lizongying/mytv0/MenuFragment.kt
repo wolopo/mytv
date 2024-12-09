@@ -41,11 +41,10 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val context = requireActivity()
-        val application = requireActivity().applicationContext as MyTVApplication
+        val application = context.applicationContext as MyTVApplication
         viewModel = ViewModelProvider(context)[MainViewModel::class.java]
 
-
-        Log.i(TAG, "groupModel ${viewModel.groupModel}")
+        Log.i(TAG, "group size ${viewModel.groupModel.size()}")
         groupAdapter = GroupAdapter(
             context,
             binding.group,
@@ -62,21 +61,10 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
         }
         groupAdapter.setItemListener(this)
 
-        var listTVModel =
-            viewModel.groupModel.getCurrentList()
-
-        Log.i(TAG, "listTVModel0 ${viewModel.groupModel.positionValue} $listTVModel")
-        if (listTVModel == null) {
-            viewModel.groupModel.setPosition(0)
-        }
-
-        listTVModel =
-            viewModel.groupModel.getCurrentList()
-        Log.i(TAG, "listTVModel1 ${viewModel.groupModel.positionValue} $listTVModel")
         listAdapter = ListAdapter(
             context,
             binding.list,
-            listTVModel!!,
+            getList(),
         )
         binding.list.adapter = listAdapter
         binding.list.layoutManager =
@@ -96,23 +84,21 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
         (activity as MainActivity).ready(TAG)
     }
 
+    private fun getList(): TVListModel? {
+        // 如果不存在當前組，則切換到收藏組
+        if (viewModel.groupModel.getCurrentList() == null) {
+            viewModel.groupModel.setPosition(0)
+        }
+
+        return viewModel.groupModel.getCurrentList()
+    }
+
     fun update() {
         view?.post {
             groupAdapter.update(viewModel.groupModel)
 
-            var listTVModel =
-                viewModel.groupModel.getCurrentList()
-
-            Log.i(TAG, "listTVModel3 ${viewModel.groupModel.positionValue} $listTVModel")
-            if (listTVModel == null) {
-                viewModel.groupModel.setPosition(0)
-            }
-            listTVModel =
-                viewModel.groupModel.getCurrentList()
-
-            Log.i(TAG, "listTVModel4 ${viewModel.groupModel.positionValue} $listTVModel")
-            if (listTVModel != null) {
-                (binding.list.adapter as ListAdapter).update(listTVModel)
+            getList()?.let {
+                (binding.list.adapter as ListAdapter).update(it)
             }
         }
     }
@@ -243,7 +229,8 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
 //                    listAdapter.focusable(true)
 //                }
 
-                if (viewModel.groupModel.tvGroupValue.size < 2 || viewModel.groupModel.getAllList()?.size() == 0
+                if (viewModel.groupModel.tvGroupValue.size < 2 || viewModel.groupModel.getAllList()
+                        ?.size() == 0
                 ) {
                     R.string.channel_not_exist.showToast()
                     return
@@ -263,8 +250,14 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
 //                listAdapter.focusable(false)
 
                 val position = viewModel.groupModel.positionPlayingValue
-                Log.i(TAG, "group position $position/${viewModel.groupModel.tvGroupValue.size}")
-                if (position != viewModel.groupModel.positionValue) {
+                if (position >= viewModel.groupModel.tvGroupValue.size) {
+                    viewModel.groupModel.setPositionPlaying(viewModel.groupModel.defaultPosition())
+                }
+                Log.i(
+                    TAG,
+                    "group position ${viewModel.groupModel.positionPlayingValue}/${viewModel.groupModel.tvGroupValue.size - 1}"
+                )
+                if (viewModel.groupModel.positionPlayingValue != viewModel.groupModel.positionValue) {
                     viewModel.groupModel.setPosition(position)
                 }
                 groupAdapter.scrollToPositionAndSelect(position)

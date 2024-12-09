@@ -15,16 +15,12 @@ import androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION
 import androidx.media3.common.Player.REPEAT_MODE_ALL
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
-import com.lizongying.mytv0.databinding.PlayerBinding
 import com.lizongying.mytv0.data.SourceType
+import com.lizongying.mytv0.databinding.PlayerBinding
 import com.lizongying.mytv0.models.TVModel
 
 
@@ -39,6 +35,7 @@ class PlayerFragment : Fragment() {
 
     private lateinit var mainActivity: MainActivity
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         mainActivity = activity as MainActivity
         super.onActivityCreated(savedInstanceState)
@@ -115,14 +112,28 @@ class PlayerFragment : Fragment() {
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        super.onPlayerError(error)
+                        Log.i(TAG, "player: ${error.errorCodeName}")
                         tvModel?.setErrInfo(R.string.play_error.getString())
-                        if (tvModel?.getSourceType() == SourceType.UNKNOWN) {
-                            tvModel?.nextSource()
-                        }
+
                         if (tvModel!!.retryTimes < tvModel!!.retryMaxTimes) {
+                            var last = true
+                            if (tvModel?.getSourceTypeDefault() == SourceType.UNKNOWN) {
+                                last = tvModel!!.nextSourceType()
+                            }
                             tvModel?.setReady()
-                            tvModel!!.retryTimes++
+                            if (last) {
+                                tvModel!!.retryTimes++
+                            }
+                            Log.i(
+                                TAG,
+                                "retry ${tvModel!!.videoIndex.value} ${tvModel!!.getSourceTypeCurrent()} ${tvModel!!.retryTimes}/${tvModel!!.retryMaxTimes}"
+                            )
+                        } else {
+                            if (!tvModel!!.isLastVideo()) {
+                                tvModel!!.nextVideo()
+                                tvModel?.setReady()
+                                tvModel!!.retryTimes = 0
+                            }
                         }
                     }
                 })
@@ -139,66 +150,28 @@ class PlayerFragment : Fragment() {
     fun play(tvModel: TVModel) {
         this.tvModel = tvModel
         player?.run {
-            IgnoreSSLCertificate.ignore()
-            val httpDataSource = DefaultHttpDataSource.Factory()
-            httpDataSource.setKeepPostFor302Redirects(true)
-            httpDataSource.setAllowCrossProtocolRedirects(true)
-            httpDataSource.setTransferListener(object : TransferListener {
-                override fun onTransferInitializing(
-                    source: DataSource,
-                    dataSpec: DataSpec,
-                    isNetwork: Boolean
-                ) {
-//                    TODO("Not yet implemented")
-                }
+            tvModel.getVideoUrl() ?: return
 
-                override fun onTransferStart(
-                    source: DataSource,
-                    dataSpec: DataSpec,
-                    isNetwork: Boolean
-                ) {
-                    Log.d(TAG, "onTransferStart uri ${source.uri}")
-//                    TODO("Not yet implemented")
-                }
-
-                override fun onBytesTransferred(
-                    source: DataSource,
-                    dataSpec: DataSpec,
-                    isNetwork: Boolean,
-                    bytesTransferred: Int
-                ) {
-//                    TODO("Not yet implemented")
-                }
-
-                override fun onTransferEnd(
-                    source: DataSource,
-                    dataSpec: DataSpec,
-                    isNetwork: Boolean
-                ) {
-//                    TODO("Not yet implemented")
-                }
-            })
-
-            val dataSource = tvModel.getSource()
-            if (dataSource != null) {
-                setMediaSource(dataSource)
-            } else {
+            while (true) {
+                val last = tvModel.isLastVideo()
                 val mediaItem = tvModel.getMediaItem()
                 if (mediaItem == null) {
-                    tvModel.setErrInfo(R.string.play_error.getString())
-                    if (tvModel.getSourceType() == SourceType.UNKNOWN) {
-                        tvModel.nextSource()
+                    if (last) {
+                        tvModel.setErrInfo(R.string.play_error.getString())
+                        break
                     }
-                    if (tvModel.retryTimes < tvModel.retryMaxTimes) {
-                        tvModel.setReady()
-                        tvModel.retryTimes++
-                    }
-                    return
+                    tvModel.nextVideo()
+                    continue
                 }
-                setMediaItem(mediaItem)
+                val mediaSource = tvModel.getMediaSource()
+                if (mediaSource != null) {
+                    setMediaSource(mediaSource)
+                } else {
+                    setMediaItem(mediaItem)
+                }
+                prepare()
+                break
             }
-
-            prepare()
         }
     }
 
@@ -228,7 +201,6 @@ class PlayerFragment : Fragment() {
     }
 
     override fun onStart() {
-        Log.i(TAG, "onStart")
         super.onStart()
         if (player?.isPlaying == false) {
             Log.i(TAG, "replay")

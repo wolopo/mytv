@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import com.lizongying.mytv0.ISP
 import com.lizongying.mytv0.SP
 
 class TVGroupModel : ViewModel() {
@@ -26,19 +25,13 @@ class TVGroupModel : ViewModel() {
     val positionPlaying: LiveData<Int>
         get() = _positionPlaying
     val positionPlayingValue: Int
-        get() = _positionPlaying.value ?: 0
+        get() = _positionPlaying.value ?: DEFAULT_POSITION_PLAYING
 
     private val _change = MutableLiveData<Boolean>()
     val change: LiveData<Boolean>
         get() = _change
 
-    private var isp = ISP.UNKNOWN
-    fun setISP(isp: ISP) {
-        this.isp = isp
-    }
-
     fun setPosition(position: Int) {
-        Log.i(TAG, "group setPosition $position")
         _position.value = position
     }
 
@@ -87,12 +80,17 @@ class TVGroupModel : ViewModel() {
         (_tvGroup.value as List<TVListModel>)[1].initTVList()
     }
 
-    fun clear() {
+    fun initPosition() {
+        setPosition(defaultPosition())
+        setPositionPlaying(defaultPosition())
+    }
+
+    fun clearData() {
         if (SP.showAllChannels) {
             _tvGroup.value =
                 mutableListOf(getFavoritesList()!!, getAllList()!!)
             setPosition(0)
-            getAllList()?.clear()
+            getAllList()?.clearData()
         } else {
             _tvGroup.value = mutableListOf(getFavoritesList()!!)
             setPosition(0)
@@ -169,15 +167,13 @@ class TVGroupModel : ViewModel() {
     // get & set
     // keep: In the current list loop
     fun getPrev(keep: Boolean = false): TVModel? {
-
-        Log.i(TAG, "keep $keep")
-
         // No item
         if (tvGroupValue.size < 2 || tvGroupValue[1].size() == 0) {
             return null
         }
 
-        var tvListModel = getCurrentList()!!
+        var tvListModel = getCurrentList() ?: return null
+
         if (keep) {
             Log.i(TAG, "group position $positionValue")
             return tvListModel.getPrev()
@@ -206,14 +202,13 @@ class TVGroupModel : ViewModel() {
 
     // get & set
     fun getNext(keep: Boolean = false): TVModel? {
-        Log.i(TAG, "keep $keep")
-
         // No item
         if (tvGroupValue.size < 2 || tvGroupValue[1].size() == 0) {
             return null
         }
 
-        var tvListModel = getCurrentList()!!
+        var tvListModel = getCurrentList() ?: return null
+
         if (keep) {
             return tvListModel.getNext()
         }
@@ -239,9 +234,14 @@ class TVGroupModel : ViewModel() {
         return tvListModel.getNext()
     }
 
+    fun defaultPosition(): Int {
+        // 1 全部
+        // 2 第一組
+        return if (tvGroupValue.size > 2) 2 else 1
+    }
+
     init {
         _position.value = SP.positionGroup
-        Log.i(TAG, "default positionGroup ${SP.positionGroup}")
         isInLikeMode = SP.defaultLike && _position.value == 0
     }
 
@@ -257,5 +257,6 @@ class TVGroupModel : ViewModel() {
 
     companion object {
         const val TAG = "TVGroupModel"
+        const val DEFAULT_POSITION_PLAYING = -1
     }
 }

@@ -10,16 +10,17 @@ import com.google.gson.JsonSyntaxException
 import com.lizongying.mytv0.R
 import com.lizongying.mytv0.SP
 import com.lizongying.mytv0.Utils.getDateFormat
-import com.lizongying.mytv0.models.EPGXmlParser
+import com.lizongying.mytv0.data.Source
 import com.lizongying.mytv0.data.SourceType
 import com.lizongying.mytv0.data.TV
+import com.lizongying.mytv0.models.EPGXmlParser
+import com.lizongying.mytv0.models.Sources
 import com.lizongying.mytv0.models.TVGroupModel
 import com.lizongying.mytv0.models.TVListModel
 import com.lizongying.mytv0.models.TVModel
 import com.lizongying.mytv0.requests.HttpClient
 import com.lizongying.mytv0.showToast
 import io.github.lizongying.Gua
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,7 +33,11 @@ class MainViewModel : ViewModel() {
     private lateinit var appDirectory: File
     var listModel: List<TVModel> = listOf()
     val groupModel = TVGroupModel()
+    private var cacheFile: File? = null
+    private var cacheChannels = ""
+    private var initialized = false
 
+    val sources = Sources()
 
     private val _channelsOk = MutableLiveData<Boolean>()
     val channelsOk: LiveData<Boolean>
@@ -57,10 +62,11 @@ class MainViewModel : ViewModel() {
 
     fun updateConfig() {
         if (SP.configAutoLoad) {
-            SP.config?.let {
+            SP.configUrl?.let {
                 if (it.startsWith("http")) {
                     viewModelScope.launch {
-                        update(it)
+                        Log.i(TAG, "updateConfig $it")
+                        importFromUrl(it)
                         SP.epg?.let { i ->
                             updateEPG(i)
                         }
@@ -70,95 +76,147 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    private fun getCache(): String {
+        return if (cacheFile!!.exists()) {
+            cacheFile!!.readText()
+        } else {
+            ""
+        }
+    }
+
     fun init(context: Context) {
         groupModel.addTVListModel(TVListModel("我的收藏", 0))
         groupModel.addTVListModel(TVListModel("全部頻道", 1))
 
         appDirectory = context.filesDir
-        val file = File(appDirectory, FILE_NAME)
-        val str = if (file.exists()) {
-            file.readText()
-        } else {
-            context.resources.openRawResource(R.raw.channels).bufferedReader()
+        cacheFile = File(appDirectory, CACHE_FILE_NAME)
+        if (!cacheFile!!.exists()) {
+            cacheFile!!.createNewFile()
+        }
+
+        cacheChannels = getCache()
+
+        if (cacheChannels.isEmpty()) {
+            cacheChannels = context.resources.openRawResource(R.raw.channels).bufferedReader()
                 .use { it.readText() }
         }
 
+        Log.i(TAG, "cacheChannels $cacheChannels")
+
         try {
-            str2List(str)
+            str2Channels(cacheChannels)
         } catch (e: Exception) {
             e.printStackTrace()
-            file.deleteOnExit()
+            cacheFile!!.deleteOnExit()
             R.string.channel_read_error.showToast()
         }
+
+        initialized = true
 
         _channelsOk.value = true
     }
 
     private suspend fun updateEPG(epg: String) {
-        try {
-            withContext(Dispatchers.IO) {
-                val request = okhttp3.Request.Builder().url(epg).build()
-                val response = HttpClient.okHttpClient.newCall(request).execute()
+        var shouldBreak = false
+        for (i in 0..2) {
+            try {
+                withContext(Dispatchers.IO) {
+                    val request = okhttp3.Request.Builder().url(epg).build()
+                    val response = HttpClient.okHttpClient.newCall(request).execute()
 
-                if (response.isSuccessful) {
-                    val res = EPGXmlParser().parse(response.body!!.byteStream())
+                    if (response.isSuccessful) {
+                        val res = EPGXmlParser().parse(response.body!!.byteStream())
 
-                    withContext(Dispatchers.Main) {
-                        for (m in listModel) {
-                            res[m.tv.name]?.let { m.setEpg(it) }
+                        withContext(Dispatchers.Main) {
+                            for (m in listModel) {
+                                res[m.tv.name]?.let { m.setEpg(it) }
+                            }
                         }
+
+                        shouldBreak = true
+                    } else {
+                        Log.e(TAG, "EPG ${response.code}")
                     }
-                } else {
-                    Log.e(TAG, "EPG ${response.code}")
-                    R.string.epg_status_err.showToast()
                 }
+            } catch (e: Exception) {
+                Log.i(TAG, "EPG request error:", e)
+//            R.string.epg_request_err.showToast()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            R.string.epg_request_err.showToast()
+
+            if (shouldBreak) {
+                break
+            }
+        }
+
+        if (!shouldBreak) {
+            R.string.epg_status_err.showToast()
         }
     }
 
-    suspend fun update(serverUrl: String) {
-        Log.i(TAG, "request $serverUrl")
-        try {
-            withContext(Dispatchers.IO) {
-                val request = okhttp3.Request.Builder().url(serverUrl).build()
-                val response = HttpClient.okHttpClient.newCall(request).execute()
-
-                if (response.isSuccessful) {
-                    val file = File(appDirectory, FILE_NAME)
-                    if (!file.exists()) {
-                        file.createNewFile()
-                    }
-                    val str = response.body!!.string()
-                    withContext(Dispatchers.Main) {
-                        if (str2List(str)) {
-                            file.writeText(str)
-                            SP.config = serverUrl
-                            _channelsOk.value = true
-                            R.string.channel_import_success.showToast()
-                        } else {
-                            R.string.channel_import_error.showToast()
-                        }
-                    }
-                } else {
-                    Log.e(TAG, "Request status ${response.code}")
-                    R.string.channel_status_error.showToast()
+    private suspend fun importFromUrl(url: String, id: String = "") {
+        val urls =
+            if (url.startsWith("https://raw.githubusercontent.com") || url.startsWith("https://github.com")) {
+                listOf(
+                    "https://ghp.ci/",
+                    "https://gh.llkk.cc/",
+                    "https://github.moeyy.xyz/",
+                    "https://mirror.ghproxy.com/",
+                    "https://ghproxy.cn/",
+                    "https://ghproxy.net/",
+                    "https://ghproxy.click/",
+                    "https://ghproxy.com/",
+                    "https://github.moeyy.cn/",
+                    "https://gh-proxy.llyke.com/",
+                    "https://www.ghproxy.cc/",
+                    "https://cf.ghproxy.cc/"
+                ).map {
+                    Pair("$it$url", url)
                 }
+            } else {
+                listOf(Pair(url, url))
             }
-        } catch (e: JsonSyntaxException) {
-            e.printStackTrace()
-            Log.e("JSON Parse Error", e.toString())
-            R.string.channel_format_error.showToast()
-        } catch (e: NullPointerException) {
-            e.printStackTrace()
-            Log.e("Null Pointer Error", e.toString())
-            R.string.channel_read_error.showToast()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Log.e(TAG, "Request error $e")
-            R.string.channel_request_error.showToast()
+
+        var err = 0
+        var shouldBreak = false
+        for ((a, b) in urls) {
+            Log.i(TAG, "request $a")
+            try {
+                withContext(Dispatchers.IO) {
+                    val request = okhttp3.Request.Builder().url(a).build()
+                    val response = HttpClient.okHttpClient.newCall(request).execute()
+
+                    if (response.isSuccessful) {
+                        val str = response.body?.string() ?: ""
+                        withContext(Dispatchers.Main) {
+                            tryStr2Channels(str, null, b, id)
+                        }
+                        err = 0
+                        shouldBreak = true
+                    } else {
+                        Log.e(TAG, "Request status ${response.code}")
+                        err = R.string.channel_status_error
+                    }
+                }
+            } catch (e: JsonSyntaxException) {
+                e.printStackTrace()
+                Log.e(TAG, "JSON Parse Error", e)
+                err = R.string.channel_format_error
+                shouldBreak = true
+            } catch (e: NullPointerException) {
+                e.printStackTrace()
+                Log.e(TAG, "Null Pointer Error", e)
+                err = R.string.channel_read_error
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Log.e(TAG, "Request error $e")
+                err = R.string.channel_request_error
+            }
+
+            if (shouldBreak) break
+        }
+
+        if (err != 0) {
+            err.showToast()
         }
     }
 
@@ -167,14 +225,14 @@ class MainViewModel : ViewModel() {
             .use { it.readText() }
 
         try {
-            str2List(str)
+            str2Channels(str)
         } catch (e: Exception) {
             e.printStackTrace()
             R.string.channel_read_error.showToast()
         }
     }
 
-    fun parseUri(uri: Uri) {
+    fun importFromUri(uri: Uri, id: String = "") {
         if (uri.scheme == "file") {
             val file = uri.toFile()
             Log.i(TAG, "file $file")
@@ -185,33 +243,61 @@ class MainViewModel : ViewModel() {
                 return
             }
 
-            try {
-                if (str2List(str)) {
-                    SP.config = uri.toString()
-                    R.string.channel_import_success.showToast()
-                } else {
-                    R.string.channel_import_error.showToast()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                file.deleteOnExit()
-                R.string.channel_read_error.showToast()
-            }
+            tryStr2Channels(str, file, uri.toString(), id)
         } else {
-            CoroutineScope(Dispatchers.IO).launch {
-                update(uri.toString())
+            viewModelScope.launch {
+                importFromUrl(uri.toString(), id)
             }
         }
     }
 
-    fun str2List(str: String): Boolean {
+    fun tryStr2Channels(str: String, file: File?, url: String, id: String = "") {
+        try {
+            if (str2Channels(str)) {
+                cacheFile!!.writeText(str)
+                cacheChannels = str
+                if (url.isNotEmpty()) {
+                    SP.configUrl = url
+                    val source = Source(
+                        id = id,
+                        uri = url
+                    )
+                    sources.addSource(
+                        source
+                    )
+                }
+                _channelsOk.value = true
+                R.string.channel_import_success.showToast()
+            } else {
+                R.string.channel_import_error.showToast()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            file?.deleteOnExit()
+            R.string.channel_read_error.showToast()
+        }
+    }
+
+    private fun str2Channels(str: String): Boolean {
         var string = str
+        if (initialized && string == cacheChannels) {
+            Log.w(TAG, "same channels")
+            return true
+        }
+
         val g = Gua()
         if (g.verify(str)) {
             string = g.decode(str)
         }
-        if (string.isBlank()) {
+
+        if (string.isEmpty()) {
+            Log.w(TAG, "channels is empty")
             return false
+        }
+
+        if (initialized && string == cacheChannels) {
+            Log.w(TAG, "same channels")
+            return true
         }
 
         val list: List<TV>
@@ -355,7 +441,7 @@ class MainViewModel : ViewModel() {
         var groupIndex = 2
         var id = 0
         for ((k, v) in map) {
-            val listTVModel = TVListModel(k, groupIndex)
+            val listTVModel = TVListModel(k.ifEmpty { "未知" }, groupIndex)
             for ((listIndex, v1) in v.withIndex()) {
                 v1.tv.id = id
                 v1.setLike(SP.getLike(id))
@@ -374,6 +460,7 @@ class MainViewModel : ViewModel() {
         // 全部频道
         (groupModel.tvGroup.value as List<TVListModel>)[1].setTVListModel(listModel)
 
+        groupModel.initPosition()
         groupModel.setChange()
 
         return true
@@ -381,6 +468,6 @@ class MainViewModel : ViewModel() {
 
     companion object {
         private const val TAG = "MainViewModel"
-        const val FILE_NAME = "channels.txt"
+        const val CACHE_FILE_NAME = "channels.txt"
     }
 }
