@@ -3,7 +3,6 @@ package com.lizongying.mytv0
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
@@ -15,7 +14,7 @@ import androidx.core.view.marginBottom
 import androidx.core.view.marginStart
 import androidx.core.view.marginTop
 import androidx.fragment.app.Fragment
-import com.bumptech.glide.Glide
+import com.lizongying.mytv0.Utils.getUrls
 import com.lizongying.mytv0.databinding.InfoBinding
 import com.lizongying.mytv0.models.TVModel
 
@@ -85,15 +84,18 @@ class InfoFragment : Fragment() {
 
         when (tvModel.tv.title) {
             else -> {
-                val width = Utils.dpToPx(100)
-                val height = Utils.dpToPx(60)
+                val width = 300
+                val height = 180
                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
 
-                val text = "${tvModel.tv.id + 1}"
-                var size = 100f
-                if (tvModel.tv.id > 999) {
-                    size = 90f
+                val channelNum = tvModel.tv.id + 1
+                var size = 150f
+                if (channelNum > 99) {
+                    size = 100f
+                }
+                if (channelNum > 999) {
+                    size = 75f
                 }
                 val paint = Paint().apply {
                     color = ContextCompat.getColor(context, R.color.title_blur)
@@ -102,20 +104,19 @@ class InfoFragment : Fragment() {
                 }
                 val x = width / 2f
                 val y = height / 2f - (paint.descent() + paint.ascent()) / 2
-                canvas.drawText(text, x, y, paint)
+                canvas.drawText(channelNum.toString(), x, y, paint)
 
-                if (tvModel.tv.logo.isNullOrBlank()) {
-                    Glide.with(this)
-                        .load(BitmapDrawable(context.resources, bitmap))
-//                        .centerInside()
-                        .into(binding.logo)
-                } else {
-                    Glide.with(this)
-                        .load(tvModel.tv.logo)
-//                        .placeholder(BitmapDrawable(context.resources, bitmap))
-                        .error(BitmapDrawable(context.resources, bitmap))
-//                        .centerInside()
-                        .into(binding.logo)
+                val url = tvModel.tv.logo
+                val name = tvModel.tv.name
+                var urls =
+                    getUrls(
+                        "live.fanmingming.com/tv/$name.png"
+                    ) + getUrls("https://raw.githubusercontent.com/fanmingming/live/main/tv/$name.png")
+                if (url.isNotEmpty()) {
+                    urls = (getUrls(url) + urls).distinct()
+                }
+                loadNextUrl(context, binding.logo, bitmap, urls, 0, handler) {
+                    tvModel.tv.logo = urls[it]
                 }
             }
         }

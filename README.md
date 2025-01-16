@@ -1,6 +1,6 @@
 # 我的電視·〇
 
-電視網絡視頻播放軟件，可以自定義視頻源
+電視視頻播放軟件，可以自定義視頻源
 
 [my-tv-0](https://github.com/lizongying/my-tv-0)
 
@@ -17,6 +17,7 @@
 注意：
 
 * 遇到問題可以先考慮重啟/恢復默認/清除數據/重新安裝等方式自助解決
+* 如果APP運行在手機上，建議在其他設備上進行遠程配置
 * 視頻源可以設置為本地文件，格式如：file:///mnt/sdcard/tmp/channels.m3u
   /channels.m3u
 
@@ -79,20 +80,18 @@ adb install my-tv-0.apk
 
 ## TODO
 
-* 軟解
 * 支持回看
 * 詳細EPG
 * 淺色菜單
 * 無效的頻道？
-* 判断文件是否被修改
-* 多源管理
 * 如果上次播放頻道不在收藏？
-* 當list為空，顯示group
+* 當list為空，顯示group/空group不顯示？
 * 默認頻道菜單顯示
+* 遠程配置使用webView
 
 ## 讚賞
 
-![image](./screenshots/appreciate.jpeg)
+![image](./screenshots/appreciate.png)
 
 ## 感謝
 

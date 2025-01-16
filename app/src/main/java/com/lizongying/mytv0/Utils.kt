@@ -5,11 +5,11 @@ import android.util.Log
 import android.util.TypedValue
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import com.google.gson.Gson
 import com.lizongying.mytv0.ISP.CHINA_MOBILE
 import com.lizongying.mytv0.ISP.CHINA_TELECOM
 import com.lizongying.mytv0.ISP.CHINA_UNICOM
 import com.lizongying.mytv0.ISP.UNKNOWN
+import com.lizongying.mytv0.data.Global.gson
 import com.lizongying.mytv0.requests.HttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +24,7 @@ enum class ISP {
     CHINA_MOBILE,
     CHINA_UNICOM,
     CHINA_TELECOM,
+    IPV6,
 }
 
 data class IpInfo(
@@ -92,7 +93,7 @@ object Utils {
             try {
                 HttpClient.okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext 0
-                    response.body?.string()?.toLong() ?: 0
+                    response.bodyAlias()?.string()?.toLong() ?: 0
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -109,8 +110,8 @@ object Utils {
             try {
                 HttpClient.okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext UNKNOWN
-                    val string = response.body?.string()
-                    val isp = Gson().fromJson(string, IpInfo::class.java).location.isp_domain
+                    val string = response.bodyAlias()?.string()
+                    val isp = gson.fromJson(string, IpInfo::class.java).location.isp_domain
                     when (isp) {
                         "ChinaMobile" -> CHINA_MOBILE
                         "ChinaUnicom" -> CHINA_UNICOM
@@ -150,5 +151,28 @@ object Utils {
 
         // Otherwise, add "http://" to the beginning of the URL
         return "http://${url}"
+    }
+
+    fun getUrls(url: String): List<String> {
+        return if (url.startsWith("https://raw.githubusercontent.com") || url.startsWith("https://github.com")) {
+            listOf(
+                "https://gh.llkk.cc/",
+                "https://github.moeyy.xyz/",
+                "https://mirror.ghproxy.com/",
+                "https://ghproxy.cn/",
+                "https://ghproxy.net/",
+                "https://ghproxy.click/",
+                "https://ghproxy.com/",
+                "https://github.moeyy.cn/",
+                "https://gh-proxy.llyke.com/",
+                "https://www.ghproxy.cc/",
+                "https://cf.ghproxy.cc/",
+                "https://ghp.ci/",
+            ).map {
+                "$it$url"
+            }
+        } else {
+            listOf(url)
+        }
     }
 }

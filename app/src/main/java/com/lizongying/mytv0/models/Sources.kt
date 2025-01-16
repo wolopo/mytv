@@ -3,15 +3,13 @@ package com.lizongying.mytv0.models
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.lizongying.mytv0.SP
+import com.lizongying.mytv0.data.Global.gson
+import com.lizongying.mytv0.data.Global.typeSourceList
 import com.lizongying.mytv0.data.Source
 
 class Sources {
-    private val type = object : TypeToken<List<Source>>() {}.type
     var version = 0
-    private val gson = Gson()
 
     private val _removed = MutableLiveData<Pair<Int, Int>>()
     val removed: LiveData<Pair<Int, Int>>
@@ -51,35 +49,39 @@ class Sources {
 //                Log.i(TAG, "setChecked $position")
 //                setChecked(position)
 //            }
+//
+//            SP.sources = gson.toJson(sources, type) ?: ""
             return true
         }
     }
 
     private fun setSources(sources: List<Source>) {
         _sources.value = sources
-        SP.sources = gson.toJson(sources, type) ?: ""
+        SP.sources = gson.toJson(sources, typeSourceList) ?: ""
     }
 
     fun addSource(source: Source) {
-        if (_sources.value == null) {
-            _sources.value = mutableListOf(source)
-        }
-
         val index = sourcesValue.indexOfFirst { it.uri == source.uri }
         if (index == -1) {
+            setSourceChecked(checkedValue, false)
+
             _sources.value = sourcesValue.toMutableList().apply {
                 add(0, source)
             }
-            SP.sources = gson.toJson(sourcesValue, type) ?: ""
 
-            _added.value = Pair(sourcesValue.size - 1, version)
+            _checked.value = 0
+            setSourceChecked(checkedValue, true)
+            SP.sources = gson.toJson(sourcesValue, typeSourceList) ?: ""
+
+            _changed.value = version
             version++
         }
     }
 
-    fun removeSource(id: String) {
+    fun removeSource(id: String): Boolean {
         if (sourcesValue.isEmpty()) {
-            return
+            Log.i(TAG, "sources is empty")
+            return false
         }
 
         val index = sourcesValue.indexOfFirst { it.id == id }
@@ -87,11 +89,15 @@ class Sources {
             _sources.value = sourcesValue.toMutableList().apply {
                 removeAt(index)
             }
-            SP.sources = gson.toJson(sourcesValue, type) ?: ""
+            SP.sources = gson.toJson(sourcesValue, typeSourceList) ?: ""
 
             _removed.value = Pair(index, version)
             version++
+            return true
         }
+
+        Log.i(TAG, "sourceId is not exists")
+        return false
     }
 
     fun getSource(idx: Int): Source? {
@@ -109,8 +115,8 @@ class Sources {
     fun init() {
         if (!SP.sources.isNullOrEmpty()) {
             try {
-                val sources: List<Source> = gson.fromJson(SP.sources!!, type)
-                setSources(sources)
+                val sources: List<Source> = gson.fromJson(SP.sources!!, typeSourceList)
+                setSources(sources.map { it.apply { checked = false } })
             } catch (e: Exception) {
                 e.printStackTrace()
                 SP.sources = SP.DEFAULT_SOURCES

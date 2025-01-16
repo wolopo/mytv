@@ -10,6 +10,11 @@ import com.google.gson.JsonSyntaxException
 import com.lizongying.mytv0.R
 import com.lizongying.mytv0.SP
 import com.lizongying.mytv0.Utils.getDateFormat
+import com.lizongying.mytv0.Utils.getUrls
+import com.lizongying.mytv0.bodyAlias
+import com.lizongying.mytv0.codeAlias
+import com.lizongying.mytv0.data.Global.gson
+import com.lizongying.mytv0.data.Global.typeTvList
 import com.lizongying.mytv0.data.Source
 import com.lizongying.mytv0.data.SourceType
 import com.lizongying.mytv0.data.TV
@@ -37,6 +42,8 @@ class MainViewModel : ViewModel() {
     private var cacheChannels = ""
     private var initialized = false
 
+    private var epgUrl = SP.epg
+
     val sources = Sources()
 
     private val _channelsOk = MutableLiveData<Boolean>()
@@ -53,8 +60,12 @@ class MainViewModel : ViewModel() {
     }
 
     fun updateEPG() {
-        if (!SP.epg.isNullOrEmpty()) {
-            viewModelScope.launch {
+        viewModelScope.launch {
+            var success = false
+            if (!epgUrl.isNullOrEmpty()) {
+                success = updateEPG(epgUrl!!)
+            }
+            if (!success && !SP.epg.isNullOrEmpty()) {
                 updateEPG(SP.epg!!)
             }
         }
@@ -67,9 +78,7 @@ class MainViewModel : ViewModel() {
                     viewModelScope.launch {
                         Log.i(TAG, "updateConfig $it")
                         importFromUrl(it)
-                        SP.epg?.let { i ->
-                            updateEPG(i)
-                        }
+                        updateEPG()
                     }
                 }
             }
@@ -97,8 +106,9 @@ class MainViewModel : ViewModel() {
         cacheChannels = getCache()
 
         if (cacheChannels.isEmpty()) {
-            cacheChannels = context.resources.openRawResource(R.raw.channels).bufferedReader()
-                .use { it.readText() }
+            cacheChannels =
+                context.resources.openRawResource(DEFAULT_CHANNELS_FILE).bufferedReader()
+                    .use { it.readText() }
         }
 
         Log.i(TAG, "cacheChannels $cacheChannels")
@@ -116,65 +126,64 @@ class MainViewModel : ViewModel() {
         _channelsOk.value = true
     }
 
-    private suspend fun updateEPG(epg: String) {
-        var shouldBreak = false
-        for (i in 0..2) {
+    private suspend fun updateEPG(url: String): Boolean {
+        val urls = getUrls(url)
+
+        var success = false
+        for (a in urls) {
+            Log.i(TAG, "request $a")
             try {
                 withContext(Dispatchers.IO) {
-                    val request = okhttp3.Request.Builder().url(epg).build()
+                    val request = okhttp3.Request.Builder().url(a).build()
                     val response = HttpClient.okHttpClient.newCall(request).execute()
 
                     if (response.isSuccessful) {
-                        val res = EPGXmlParser().parse(response.body!!.byteStream())
+                        val res = EPGXmlParser().parse(response.bodyAlias()!!.byteStream())
 
                         withContext(Dispatchers.Main) {
                             for (m in listModel) {
-                                res[m.tv.name]?.let { m.setEpg(it) }
+                                val name = m.tv.name.ifEmpty { m.tv.title }.lowercase()
+                                if (name.isEmpty()) {
+                                    continue
+                                }
+
+                                for ((n, epg) in res) {
+                                    if (name.contains(n, ignoreCase = true)) {
+                                        m.setEpg(epg)
+                                        if (m.tv.logo.isEmpty()) {
+                                            m.tv.logo = "https://live.fanmingming.com/tv/$n.png"
+                                        }
+                                        break
+                                    }
+                                }
                             }
                         }
 
-                        shouldBreak = true
+                        success = true
+                        Log.i(TAG, "EPG success")
                     } else {
-                        Log.e(TAG, "EPG ${response.code}")
+                        Log.e(TAG, "EPG ${response.codeAlias()}")
                     }
                 }
             } catch (e: Exception) {
-                Log.i(TAG, "EPG request error:", e)
+                Log.i(TAG, "EPG request error: $a", e)
 //            R.string.epg_request_err.showToast()
             }
 
-            if (shouldBreak) {
+            if (success) {
                 break
             }
         }
 
-        if (!shouldBreak) {
-            R.string.epg_status_err.showToast()
+        if (!success) {
+//            R.string.epg_status_err.showToast()
         }
+
+        return success
     }
 
     private suspend fun importFromUrl(url: String, id: String = "") {
-        val urls =
-            if (url.startsWith("https://raw.githubusercontent.com") || url.startsWith("https://github.com")) {
-                listOf(
-                    "https://ghp.ci/",
-                    "https://gh.llkk.cc/",
-                    "https://github.moeyy.xyz/",
-                    "https://mirror.ghproxy.com/",
-                    "https://ghproxy.cn/",
-                    "https://ghproxy.net/",
-                    "https://ghproxy.click/",
-                    "https://ghproxy.com/",
-                    "https://github.moeyy.cn/",
-                    "https://gh-proxy.llyke.com/",
-                    "https://www.ghproxy.cc/",
-                    "https://cf.ghproxy.cc/"
-                ).map {
-                    Pair("$it$url", url)
-                }
-            } else {
-                listOf(Pair(url, url))
-            }
+        val urls = getUrls(url).map { Pair(it, url) }
 
         var err = 0
         var shouldBreak = false
@@ -186,14 +195,14 @@ class MainViewModel : ViewModel() {
                     val response = HttpClient.okHttpClient.newCall(request).execute()
 
                     if (response.isSuccessful) {
-                        val str = response.body?.string() ?: ""
+                        val str = response.bodyAlias()?.string() ?: ""
                         withContext(Dispatchers.Main) {
                             tryStr2Channels(str, null, b, id)
                         }
                         err = 0
                         shouldBreak = true
                     } else {
-                        Log.e(TAG, "Request status ${response.code}")
+                        Log.e(TAG, "Request status ${response.codeAlias()}")
                         err = R.string.channel_status_error
                     }
                 }
@@ -221,7 +230,7 @@ class MainViewModel : ViewModel() {
     }
 
     fun reset(context: Context) {
-        val str = context.resources.openRawResource(R.raw.channels).bufferedReader()
+        val str = context.resources.openRawResource(DEFAULT_CHANNELS_FILE).bufferedReader()
             .use { it.readText() }
 
         try {
@@ -305,8 +314,7 @@ class MainViewModel : ViewModel() {
         when (string[0]) {
             '[' -> {
                 try {
-                    val type = object : com.google.gson.reflect.TypeToken<List<TV>>() {}.type
-                    list = com.google.gson.Gson().fromJson(string, type)
+                    list = gson.fromJson(string, typeTvList)
                     Log.i(TAG, "导入频道 ${list.size}")
                 } catch (e: Exception) {
                     Log.i(TAG, "parse error $string")
@@ -327,7 +335,7 @@ class MainViewModel : ViewModel() {
                 for ((index, line) in lines.withIndex()) {
                     val trimmedLine = line.trim()
                     if (trimmedLine.startsWith("#EXTM3U")) {
-                        SP.epg = epgRegex.find(trimmedLine)?.groupValues?.get(1)?.trim()
+                        epgUrl = epgRegex.find(trimmedLine)?.groupValues?.get(1)?.trim()
                     } else if (trimmedLine.startsWith("#EXTINF")) {
                         val info = trimmedLine.split(",")
                         val title = info.last().trim()
@@ -346,6 +354,7 @@ class MainViewModel : ViewModel() {
                             logo ?: "",
                             "",
                             uris,
+                            0,
                             mapOf(),
                             group,
                             SourceType.UNKNOWN,
@@ -364,11 +373,12 @@ class MainViewModel : ViewModel() {
                     val t1 = TV(
                         -1,
                         t0.name,
-                        t0.name,
+                        t0.title,
                         "",
                         t0.logo,
                         "",
                         uris,
+                        0,
                         mapOf(),
                         t0.group,
                         SourceType.UNKNOWN,
@@ -391,6 +401,9 @@ class MainViewModel : ViewModel() {
                         if (trimmedLine.contains("#genre#")) {
                             group = trimmedLine.split(',', limit = 2)[0].trim()
                         } else {
+                            if (!trimmedLine.contains(",")) {
+                                continue
+                            }
                             val arr = trimmedLine.split(',').map { it.trim() }
                             val title = arr.first().trim()
                             val uris = arr.drop(1)
@@ -414,6 +427,7 @@ class MainViewModel : ViewModel() {
                         "",
                         "",
                         uris,
+                        0,
                         mapOf(),
                         channelGroup,
                         SourceType.UNKNOWN,
@@ -458,7 +472,7 @@ class MainViewModel : ViewModel() {
         listModel = listModelNew
 
         // 全部频道
-        (groupModel.tvGroup.value as List<TVListModel>)[1].setTVListModel(listModel)
+        groupModel.tvGroupValue[1].setTVListModel(listModel)
 
         groupModel.initPosition()
         groupModel.setChange()
@@ -469,5 +483,6 @@ class MainViewModel : ViewModel() {
     companion object {
         private const val TAG = "MainViewModel"
         const val CACHE_FILE_NAME = "channels.txt"
+        val DEFAULT_CHANNELS_FILE = R.raw.channels
     }
 }

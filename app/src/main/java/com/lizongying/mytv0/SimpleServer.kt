@@ -3,22 +3,27 @@ package com.lizongying.mytv0
 
 import MainViewModel
 import MainViewModel.Companion.CACHE_FILE_NAME
+import MainViewModel.Companion.DEFAULT_CHANNELS_FILE
 import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.lizongying.mytv0.Utils.getUrls
+import com.lizongying.mytv0.data.Global.gson
+import com.lizongying.mytv0.data.Global.typeSourceList
 import com.lizongying.mytv0.data.ReqSettings
 import com.lizongying.mytv0.data.ReqSourceAdd
 import com.lizongying.mytv0.data.ReqSources
 import com.lizongying.mytv0.data.RespSettings
 import com.lizongying.mytv0.data.Source
-import com.lizongying.mytv0.models.Sources
+import com.lizongying.mytv0.requests.HttpClient
 import fi.iki.elonen.NanoHTTPD
+import io.github.lizongying.Gua
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.IOException
 import java.nio.charset.StandardCharsets
 
 
@@ -30,15 +35,16 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         try {
             start()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "init", e)
         }
     }
 
     override fun serve(session: IHTTPSession): Response {
         return when (session.uri) {
             "/api/settings" -> handleSettings()
-            "/api/channels" -> handleChannelsFromFile(session)
-            "/api/uri" -> handleChannelsFromUri(session)
+            "/api/sources" -> handleSources()
+            "/api/import-text" -> handleImportFromText(session)
+            "/api/import-uri" -> handleImportFromUri(session)
             "/api/proxy" -> handleProxy(session)
             "/api/epg" -> handleEPG(session)
             "/api/channel" -> handleDefaultChannel(session)
@@ -57,7 +63,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 ""
             }
             if (str.isEmpty()) {
-                str = context.resources.openRawResource(R.raw.channels).bufferedReader()
+                str = context.resources.openRawResource(DEFAULT_CHANNELS_FILE).bufferedReader()
                     .use { it.readText() }
             }
 
@@ -65,8 +71,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
 
             if (!SP.sources.isNullOrEmpty()) {
                 try {
-                    val type = object : TypeToken<List<Source>>() {}.type
-                    val sources: List<Source> = Gson().fromJson(SP.sources!!, type)
+                    val sources: List<Source> = gson.fromJson(SP.sources!!, typeSourceList)
                     history = sources.toMutableList()
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -82,9 +87,9 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 epg = SP.epg ?: "",
                 history = history
             )
-            response = Gson().toJson(respSettings) ?: ""
+            response = gson.toJson(respSettings) ?: ""
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleSettings", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -95,7 +100,48 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         return newFixedLengthResponse(Response.Status.OK, "application/json", response)
     }
 
-    private fun handleChannelsFromFile(session: IHTTPSession): Response {
+    private suspend fun fetchSources(url: String): String {
+        val urls = getUrls(url)
+
+        var sources = ""
+        var success = false
+        for (a in urls) {
+            Log.i(TAG, "request $a")
+            try {
+                withContext(Dispatchers.IO) {
+                    val request = okhttp3.Request.Builder().url(a).build()
+                    val response = HttpClient.okHttpClient.newCall(request).execute()
+
+                    if (response.isSuccessful) {
+                        sources = response.bodyAlias()?.string() ?: ""
+                        success = true
+                    } else {
+                        Log.e(TAG, "Request status ${response.codeAlias()}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchSources", e)
+            }
+
+            if (success) break
+        }
+
+        return sources
+    }
+
+    private fun handleSources(): Response {
+        val response = runBlocking(Dispatchers.IO) {
+            fetchSources("https://raw.githubusercontent.com/lizongying/my-tv-0/main/app/src/main/res/raw/sources.txt")
+        }
+
+        return newFixedLengthResponse(
+            Response.Status.OK,
+            "application/json",
+            Gua().decode(response)
+        )
+    }
+
+    private fun handleImportFromText(session: IHTTPSession): Response {
         R.string.start_config_channel.showToast()
         val response = ""
         try {
@@ -105,7 +151,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleImportFromText", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -115,18 +161,19 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         return newFixedLengthResponse(Response.Status.OK, "text/plain", response)
     }
 
-    private fun handleChannelsFromUri(session: IHTTPSession): Response {
+    private fun handleImportFromUri(session: IHTTPSession): Response {
         R.string.start_config_channel.showToast()
         val response = ""
         try {
             readBody(session)?.let {
-                val req = Gson().fromJson(it, ReqSourceAdd::class.java)
+                val req = gson.fromJson(it, ReqSourceAdd::class.java)
                 val uri = Uri.parse(req.uri)
                 handler.post {
                     viewModel.importFromUri(uri, req.id)
                 }
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            Log.e(TAG, "handleImportFromUri", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -140,7 +187,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         try {
             readBody(session)?.let {
                 handler.post {
-                    val req = Gson().fromJson(it, ReqSettings::class.java)
+                    val req = gson.fromJson(it, ReqSettings::class.java)
                     if (req.proxy != null) {
                         SP.proxy = req.proxy
                         R.string.default_proxy_set_success.showToast()
@@ -150,7 +197,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleProxy", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -165,9 +212,10 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         try {
             readBody(session)?.let {
                 handler.post {
-                    val req = Gson().fromJson(it, ReqSettings::class.java)
+                    val req = gson.fromJson(it, ReqSettings::class.java)
                     if (req.epg != null) {
                         SP.epg = req.epg
+                        viewModel.updateEPG()
                         R.string.default_epg_set_success.showToast()
                     } else {
                         R.string.default_epg_set_failure.showToast()
@@ -175,7 +223,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleEPG", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -192,7 +240,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         try {
             readBody(session)?.let {
                 handler.post {
-                    val req = Gson().fromJson(it, ReqSettings::class.java)
+                    val req = gson.fromJson(it, ReqSettings::class.java)
                     if (req.channel != null && req.channel > -1) {
                         SP.channel = req.channel
                         R.string.default_channel_set_success.showToast()
@@ -202,7 +250,7 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleDefaultChannel", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
@@ -217,16 +265,22 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         try {
             readBody(session)?.let {
                 handler.post {
-                    val req = Gson().fromJson(it, ReqSources::class.java)
+                    val req = gson.fromJson(it, ReqSources::class.java)
                     Log.i(TAG, "req $req")
                     if (req.sourceId.isNotEmpty()) {
-                        viewModel.sources.removeSource(req.sourceId)
+                        val res = viewModel.sources.removeSource(req.sourceId)
+                        if (res) {
+                            Log.i(TAG, "remove source success ${req.sourceId}")
+                        } else {
+                            Log.i(TAG, "remove source failure ${req.sourceId}")
+                        }
                     } else {
+                        Log.i(TAG, "remove source failure, sourceId is empty")
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "handleRemoveSource", e)
             return newFixedLengthResponse(
                 Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,

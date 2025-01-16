@@ -4,8 +4,8 @@ package com.lizongying.mytv0
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.lizongying.mytv0.data.Global.gson
+import com.lizongying.mytv0.data.Global.typeSourceList
 import com.lizongying.mytv0.data.Source
 import io.github.lizongying.Gua
 
@@ -58,18 +58,21 @@ object SP {
 
     private const val KEY_SOURCES = "sources"
 
+    private const val KEY_SOFT_DECODE = "soft_decode"
+
     const val DEFAULT_CHANNEL_REVERSAL = false
     const val DEFAULT_CONFIG_URL = ""
     const val DEFAULT_CHANNEL_NUM = false
     const val DEFAULT_TIME = true
     const val DEFAULT_BOOT_STARTUP = false
     const val DEFAULT_PROXY = ""
-    const val DEFAULT_EPG = "https://live.fanmingming.com/e.xml"
+    const val DEFAULT_EPG = "https://raw.githubusercontent.com/fanmingming/live/main/e.xml"
     const val DEFAULT_CHANNEL = 0
     const val DEFAULT_SHOW_ALL_CHANNELS = false
     const val DEFAULT_COMPACT_MENU = true
-    const val DEFAULT_DISPLAY_SECONDS = false
+    const val DEFAULT_DISPLAY_SECONDS = true
     const val DEFAULT_LOG_TIMES = 10
+    const val DEFAULT_SOFT_DECODE = false
 
     // 0 favorite; 1 all
     const val DEFAULT_POSITION_GROUP = 1
@@ -93,11 +96,12 @@ object SP {
             .use {
                 val str = it.readText()
                 if (str.isNotEmpty()) {
-                    DEFAULT_SOURCES = Gson().toJson(Gua().decode(str).trim().split("\n").map { i ->
-                        Source(
-                            uri = i
-                        )
-                    }, object : TypeToken<List<Source>>() {}.type
+                    DEFAULT_SOURCES = gson.toJson(
+                        Gua().decode(str).trim().split("\n").map { i ->
+                            Source(
+                                uri = i
+                            )
+                        }, typeSourceList
                     ) ?: ""
                 }
             }
@@ -167,6 +171,10 @@ object SP {
     var displaySeconds: Boolean
         get() = sp.getBoolean(KEY_DISPLAY_SECONDS, DEFAULT_DISPLAY_SECONDS)
         set(value) = sp.edit().putBoolean(KEY_DISPLAY_SECONDS, value).apply()
+
+    var softDecode: Boolean
+        get() = sp.getBoolean(KEY_SOFT_DECODE, DEFAULT_SOFT_DECODE)
+        set(value) = sp.edit().putBoolean(KEY_SOFT_DECODE, value).apply()
 
     fun getLike(id: Int): Boolean {
         val stringSet = sp.getStringSet(KEY_LIKE, emptySet())

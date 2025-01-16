@@ -81,10 +81,14 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
         binding.menu.setOnClickListener {
             hideSelf()
         }
-        (activity as MainActivity).ready(TAG)
     }
 
     private fun getList(): TVListModel? {
+        if (!this::viewModel.isInitialized) {
+            Log.e(TAG, "viewModel is not initialized")
+            return null
+        }
+
         // 如果不存在當前組，則切換到收藏組
         if (viewModel.groupModel.getCurrentList() == null) {
             viewModel.groupModel.setPosition(0)
@@ -95,7 +99,7 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
 
     fun update() {
         view?.post {
-            groupAdapter.update(viewModel.groupModel)
+            groupAdapter.changed()
 
             getList()?.let {
                 (binding.list.adapter as ListAdapter).update(it)
@@ -120,6 +124,11 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
     }
 
     fun updateList(position: Int) {
+        if (!this::viewModel.isInitialized) {
+            Log.e(TAG, "viewModel is not initialized")
+            return
+        }
+
         viewModel.groupModel.setPosition(position)
         SP.positionGroup = position
 
@@ -131,7 +140,7 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
     private fun hideSelf() {
         requireActivity().supportFragmentManager.beginTransaction()
             .hide(this)
-            .commit()
+            .commitAllowingStateLoss()
     }
 
     override fun onItemFocusChange(listTVModel: TVListModel, hasFocus: Boolean) {
@@ -154,13 +163,21 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
     }
 
     override fun onItemClicked(position: Int, type: String) {
-        viewModel.groupModel.setPlaying()
+        if (!this::viewModel.isInitialized) {
+            Log.e(TAG, "viewModel is not initialized")
+            return
+        }
+
+        viewModel.groupModel.setPositionPlaying()
         viewModel.groupModel.getCurrentList()?.let {
             it.setPosition(position)
-            it.setPlaying()
+            it.setPositionPlaying()
             it.getCurrent()?.setReady()
         }
-        (activity as MainActivity).hideMenuFragment()
+
+        requireActivity().supportFragmentManager.beginTransaction()
+            .hide(this)
+            .commitAllowingStateLoss()
     }
 
     override fun onKey(keyCode: Int): Boolean {
@@ -200,7 +217,6 @@ class MenuFragment : Fragment(), GroupAdapter.ItemListener, ListAdapter.ItemList
                 groupAdapter.focusable(true)
                 listAdapter.focusable(false)
                 listAdapter.clear()
-                Log.i(TAG, "group toPosition on left")
                 groupAdapter.scrollToPositionAndSelect(viewModel.groupModel.positionValue)
                 return true
             }
