@@ -7,13 +7,17 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.JsonSyntaxException
+import com.lizongying.mytv0.ImageHelper
+import com.lizongying.mytv0.MyTVApplication
 import com.lizongying.mytv0.R
 import com.lizongying.mytv0.SP
 import com.lizongying.mytv0.Utils.getDateFormat
 import com.lizongying.mytv0.Utils.getUrls
 import com.lizongying.mytv0.bodyAlias
 import com.lizongying.mytv0.codeAlias
+import com.lizongying.mytv0.data.EPG
 import com.lizongying.mytv0.data.Global.gson
+import com.lizongying.mytv0.data.Global.typeEPGMap
 import com.lizongying.mytv0.data.Global.typeTvList
 import com.lizongying.mytv0.data.Source
 import com.lizongying.mytv0.data.SourceType
@@ -30,19 +34,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
 
 
 class MainViewModel : ViewModel() {
     private var timeFormat = if (SP.displaySeconds) "HH:mm:ss" else "HH:mm"
 
     private lateinit var appDirectory: File
-    var listModel: List<TVModel> = listOf()
+    var listModel: List<TVModel> = emptyList()
     val groupModel = TVGroupModel()
     private var cacheFile: File? = null
     private var cacheChannels = ""
     private var initialized = false
 
+    private lateinit var cacheEPG: File
     private var epgUrl = SP.epg
+
+    private lateinit var imageHelper: ImageHelper
 
     val sources = Sources()
 
@@ -94,6 +102,9 @@ class MainViewModel : ViewModel() {
     }
 
     fun init(context: Context) {
+        val application = context.applicationContext as MyTVApplication
+        imageHelper = application.imageHelper
+
         groupModel.addTVListModel(TVListModel("我的收藏", 0))
         groupModel.addTVListModel(TVListModel("全部頻道", 1))
 
@@ -116,9 +127,23 @@ class MainViewModel : ViewModel() {
         try {
             str2Channels(cacheChannels)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "init", e)
             cacheFile!!.deleteOnExit()
             R.string.channel_read_error.showToast()
+        }
+
+        viewModelScope.launch {
+            cacheEPG = File(appDirectory, CACHE_EPG)
+            if (!cacheEPG.exists()) {
+                cacheEPG.createNewFile()
+            } else {
+                Log.i(TAG, "cacheEPG exists")
+                if (readEPG(cacheEPG.readText())) {
+                    Log.i(TAG, "cacheEPG success")
+                } else {
+                    Log.i(TAG, "cacheEPG failure")
+                }
+            }
         }
 
         initialized = true
@@ -126,57 +151,114 @@ class MainViewModel : ViewModel() {
         _channelsOk.value = true
     }
 
+    suspend fun preloadLogo() {
+        if (!this::imageHelper.isInitialized) {
+            Log.w(TAG, "imageHelper is not initialized")
+            return
+        }
+
+        for (tvModel in listModel) {
+            var name = tvModel.tv.name
+            if (name.isEmpty()) {
+                name = tvModel.tv.title
+            }
+            val url = tvModel.tv.logo
+            var urls =
+                listOf(
+                    "https://live.fanmingming.cn/tv/$name.png"
+                ) + getUrls("https://raw.githubusercontent.com/fanmingming/live/main/tv/$name.png")
+            if (url.isNotEmpty()) {
+                urls = (getUrls(url) + urls).distinct()
+            }
+
+            imageHelper.preloadImage(
+                name,
+                urls,
+            )
+        }
+    }
+
+    suspend fun readEPG(input: InputStream): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val res = EPGXmlParser().parse(input)
+
+            withContext(Dispatchers.Main) {
+                val e1 = mutableMapOf<String, List<EPG>>()
+                for (m in listModel) {
+                    val name = m.tv.name.ifEmpty { m.tv.title }.lowercase()
+                    if (name.isEmpty()) {
+                        continue
+                    }
+
+                    for ((n, epg) in res) {
+                        if (name.contains(n, ignoreCase = true)) {
+                            m.setEpg(epg)
+                            e1[name] = epg
+                            break
+                        }
+                    }
+                }
+                cacheEPG.writeText(gson.toJson(e1))
+            }
+            Log.i(TAG, "readEPG success")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "readEPG", e)
+            false
+        }
+    }
+
+    private suspend fun readEPG(str: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val res: Map<String, List<EPG>> = gson.fromJson(str, typeEPGMap)
+
+            withContext(Dispatchers.Main) {
+                for (m in listModel) {
+                    val name = m.tv.name.ifEmpty { m.tv.title }.lowercase()
+                    if (name.isEmpty()) {
+                        continue
+                    }
+
+                    val epg = res[name]
+                    if (epg != null) {
+                        m.setEpg(epg)
+                    }
+                }
+            }
+            Log.i(TAG, "readEPG success")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "readEPG", e)
+            false
+        }
+    }
+
     private suspend fun updateEPG(url: String): Boolean {
-        val urls = getUrls(url)
+        val urls = url.split(",").flatMap { u -> getUrls(u) }
 
         var success = false
         for (a in urls) {
             Log.i(TAG, "request $a")
-            try {
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                try {
                     val request = okhttp3.Request.Builder().url(a).build()
                     val response = HttpClient.okHttpClient.newCall(request).execute()
 
                     if (response.isSuccessful) {
-                        val res = EPGXmlParser().parse(response.bodyAlias()!!.byteStream())
-
-                        withContext(Dispatchers.Main) {
-                            for (m in listModel) {
-                                val name = m.tv.name.ifEmpty { m.tv.title }.lowercase()
-                                if (name.isEmpty()) {
-                                    continue
-                                }
-
-                                for ((n, epg) in res) {
-                                    if (name.contains(n, ignoreCase = true)) {
-                                        m.setEpg(epg)
-                                        if (m.tv.logo.isEmpty()) {
-                                            m.tv.logo = "https://live.fanmingming.com/tv/$n.png"
-                                        }
-                                        break
-                                    }
-                                }
-                            }
+                        if (readEPG(response.bodyAlias()!!.byteStream())) {
+                            success = true
                         }
-
-                        success = true
-                        Log.i(TAG, "EPG success")
                     } else {
-                        Log.e(TAG, "EPG ${response.codeAlias()}")
+                        Log.e(TAG, "EPG $a ${response.codeAlias()}")
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "EPG request error: $a", e)
                 }
-            } catch (e: Exception) {
-                Log.i(TAG, "EPG request error: $a", e)
-//            R.string.epg_request_err.showToast()
             }
 
             if (success) {
                 break
             }
-        }
-
-        if (!success) {
-//            R.string.epg_status_err.showToast()
         }
 
         return success
@@ -189,8 +271,8 @@ class MainViewModel : ViewModel() {
         var shouldBreak = false
         for ((a, b) in urls) {
             Log.i(TAG, "request $a")
-            try {
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                try {
                     val request = okhttp3.Request.Builder().url(a).build()
                     val response = HttpClient.okHttpClient.newCall(request).execute()
 
@@ -205,22 +287,21 @@ class MainViewModel : ViewModel() {
                         Log.e(TAG, "Request status ${response.codeAlias()}")
                         err = R.string.channel_status_error
                     }
+                } catch (e: JsonSyntaxException) {
+                    e.printStackTrace()
+                    Log.e(TAG, "JSON Parse Error", e)
+                    err = R.string.channel_format_error
+                    shouldBreak = true
+                } catch (e: NullPointerException) {
+                    e.printStackTrace()
+                    Log.e(TAG, "Null Pointer Error", e)
+                    err = R.string.channel_read_error
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    Log.e(TAG, "Request error $e")
+                    err = R.string.channel_request_error
                 }
-            } catch (e: JsonSyntaxException) {
-                e.printStackTrace()
-                Log.e(TAG, "JSON Parse Error", e)
-                err = R.string.channel_format_error
-                shouldBreak = true
-            } catch (e: NullPointerException) {
-                e.printStackTrace()
-                Log.e(TAG, "Null Pointer Error", e)
-                err = R.string.channel_read_error
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Log.e(TAG, "Request error $e")
-                err = R.string.channel_request_error
             }
-
             if (shouldBreak) break
         }
 
@@ -315,10 +396,9 @@ class MainViewModel : ViewModel() {
             '[' -> {
                 try {
                     list = gson.fromJson(string, typeTvList)
-                    Log.i(TAG, "导入频道 ${list.size}")
+                    Log.i(TAG, "导入频道 ${list.size} $list")
                 } catch (e: Exception) {
-                    Log.i(TAG, "parse error $string")
-                    Log.i(TAG, e.message, e)
+                    Log.e(TAG, "str2Channels", e)
                     return false
                 }
             }
@@ -332,40 +412,54 @@ class MainViewModel : ViewModel() {
 
                 val l = mutableListOf<TV>()
                 val tvMap = mutableMapOf<String, List<TV>>()
-                for ((index, line) in lines.withIndex()) {
+
+                var tv = TV()
+                for (line in lines) {
                     val trimmedLine = line.trim()
+                    if (trimmedLine.isEmpty()) {
+                        continue
+                    }
                     if (trimmedLine.startsWith("#EXTM3U")) {
                         epgUrl = epgRegex.find(trimmedLine)?.groupValues?.get(1)?.trim()
                     } else if (trimmedLine.startsWith("#EXTINF")) {
-                        val info = trimmedLine.split(",")
-                        val title = info.last().trim()
-                        var name = nameRegex.find(info.first())?.groupValues?.get(1)?.trim()
-                        name = name ?: title
-                        var group = groupRegex.find(info.first())?.groupValues?.get(1)?.trim()
-                        group = group ?: ""
-                        val logo = logRegex.find(info.first())?.groupValues?.get(1)?.trim()
-                        val uris =
-                            if (index + 1 < lines.size) listOf(lines[index + 1].trim()) else emptyList()
-                        val tv = TV(
-                            -1,
-                            name,
-                            title,
-                            "",
-                            logo ?: "",
-                            "",
-                            uris,
-                            0,
-                            mapOf(),
-                            group,
-                            SourceType.UNKNOWN,
-                            listOf(),
-                        )
-
-                        if (!tvMap.containsKey(group + name)) {
-                            tvMap[group + name] = listOf()
+                        Log.i(TAG, "TV $tv")
+                        val key = tv.group + tv.name
+                        if (key.isNotEmpty()) {
+                            tvMap[key] =
+                                if (!tvMap.containsKey(key)) listOf(tv) else tvMap[key]!! + tv
                         }
-                        tvMap[group + name] = tvMap[group + name]!! + tv
+                        tv = TV()
+                        val info = trimmedLine.split(",")
+                        tv.title = info.last().trim()
+                        var name = nameRegex.find(info.first())?.groupValues?.get(1)?.trim()
+                        tv.name = if (name.isNullOrEmpty()) tv.title else name
+                        tv.logo = logRegex.find(info.first())?.groupValues?.get(1)?.trim() ?: ""
+                        tv.group = groupRegex.find(info.first())?.groupValues?.get(1)?.trim() ?: ""
+                    } else if (trimmedLine.startsWith("#EXTVLCOPT:http-")) {
+                        val keyValue =
+                            trimmedLine.substringAfter("#EXTVLCOPT:http-").split("=", limit = 2)
+                        if (keyValue.size == 2) {
+                            tv.headers = if (tv.headers == null) {
+                                mapOf<String, String>(keyValue[0] to keyValue[1])
+                            } else {
+                                tv.headers!!.toMutableMap().apply {
+                                    this[keyValue[0]] = keyValue[1]
+                                }
+                            }
+                        }
+                    } else if (!trimmedLine.startsWith("#")) {
+                        tv.uris = if (tv.uris.isEmpty()) {
+                            listOf(trimmedLine)
+                        } else {
+                            tv.uris.toMutableList().apply {
+                                this.add(trimmedLine)
+                            }
+                        }
                     }
+                }
+                val key = tv.group + tv.name
+                if (key.isNotEmpty()) {
+                    tvMap[key] = if (!tvMap.containsKey(key)) listOf(tv) else tvMap[key]!! + tv
                 }
                 for ((_, tv) in tvMap) {
                     val uris = tv.map { t -> t.uris }.flatten()
@@ -379,15 +473,15 @@ class MainViewModel : ViewModel() {
                         "",
                         uris,
                         0,
-                        mapOf(),
+                        t0.headers,
                         t0.group,
                         SourceType.UNKNOWN,
-                        listOf(),
+                        emptyList(),
                     )
                     l.add(t1)
                 }
                 list = l
-                Log.i(TAG, "导入频道 ${list.size}")
+                Log.i(TAG, "导入频道 ${list.size} $list")
             }
 
             else -> {
@@ -408,11 +502,11 @@ class MainViewModel : ViewModel() {
                             val title = arr.first().trim()
                             val uris = arr.drop(1)
 
-                            if (!tvMap.containsKey(group + title)) {
-                                tvMap[group + title] = listOf()
-                                tvMap[group + title] = tvMap[group + title]!! + group
+                            val key = group + title
+                            if (!tvMap.containsKey(key)) {
+                                tvMap[key] = listOf(group)
                             }
-                            tvMap[group + title] = tvMap[group + title]!! + uris
+                            tvMap[key] = tvMap[key]!! + uris
                         }
                     }
                 }
@@ -428,10 +522,10 @@ class MainViewModel : ViewModel() {
                         "",
                         uris,
                         0,
-                        mapOf(),
+                        emptyMap(),
                         channelGroup,
                         SourceType.UNKNOWN,
-                        listOf(),
+                        emptyList(),
                     )
 
                     l.add(tv)
@@ -474,8 +568,15 @@ class MainViewModel : ViewModel() {
         // 全部频道
         groupModel.tvGroupValue[1].setTVListModel(listModel)
 
-        groupModel.initPosition()
+        if (string != cacheChannels && g.encode(string) != cacheChannels) {
+            groupModel.initPosition()
+        }
+
         groupModel.setChange()
+
+        viewModelScope.launch {
+            preloadLogo()
+        }
 
         return true
     }
@@ -483,6 +584,7 @@ class MainViewModel : ViewModel() {
     companion object {
         private const val TAG = "MainViewModel"
         const val CACHE_FILE_NAME = "channels.txt"
+        const val CACHE_EPG = "epg.xml"
         val DEFAULT_CHANNELS_FILE = R.raw.channels
     }
 }

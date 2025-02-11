@@ -107,8 +107,8 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
         var success = false
         for (a in urls) {
             Log.i(TAG, "request $a")
-            try {
-                withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO) {
+                try {
                     val request = okhttp3.Request.Builder().url(a).build()
                     val response = HttpClient.okHttpClient.newCall(request).execute()
 
@@ -118,9 +118,9 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                     } else {
                         Log.e(TAG, "Request status ${response.codeAlias()}")
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "fetchSources", e)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "fetchSources", e)
             }
 
             if (success) break
@@ -191,8 +191,10 @@ class SimpleServer(private val context: Context, private val viewModel: MainView
                     if (req.proxy != null) {
                         SP.proxy = req.proxy
                         R.string.default_proxy_set_success.showToast()
+                        Log.i(TAG, "set proxy success")
                     } else {
                         R.string.default_proxy_set_failure.showToast()
+                        Log.i(TAG, "set proxy failure")
                     }
                 }
             }

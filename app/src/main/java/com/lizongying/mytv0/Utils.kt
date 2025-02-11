@@ -72,31 +72,32 @@ object Utils {
                     between = System.currentTimeMillis() - currentTimeMillis
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "init", e)
             }
 
-            try {
-                withContext(Dispatchers.Main) {
-                    _isp.value = getISP()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+//            try {
+//                withContext(Dispatchers.Main) {
+//                    _isp.value = getISP()
+//                }
+//            } catch (e: Exception) {
+//                e.printStackTrace()
+//            }
         }
     }
 
     private suspend fun getTimestampFromServer(): Long {
         return withContext(Dispatchers.IO) {
-            val request = okhttp3.Request.Builder()
-                .url("https://ip.ddnspod.com/timestamp")
-                .build()
             try {
+                val request = okhttp3.Request.Builder()
+                    .url("https://ip.ddnspod.com/timestamp")
+                    .build()
+
                 HttpClient.okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext 0
                     response.bodyAlias()?.string()?.toLong() ?: 0
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "getTimestampFromServer", e)
                 0
             }
         }
@@ -104,10 +105,11 @@ object Utils {
 
     private suspend fun getISP(): ISP {
         return withContext(Dispatchers.IO) {
-            val request = okhttp3.Request.Builder()
-                .url("https://api.myip.la/json")
-                .build()
             try {
+                val request = okhttp3.Request.Builder()
+                    .url("https://api.myip.la/json")
+                    .build()
+
                 HttpClient.okHttpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withContext UNKNOWN
                     val string = response.bodyAlias()?.string()
@@ -120,7 +122,7 @@ object Utils {
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "getISP", e)
                 UNKNOWN
             }
         }
@@ -139,18 +141,15 @@ object Utils {
     }
 
     fun formatUrl(url: String): String {
-        // Check if the URL already starts with "http://" or "https://"
-        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://")) {
+        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://") || url.startsWith("socks://") || url.startsWith("socks5://")) {
             return url
         }
 
-        // Check if the URL starts with "//"
         if (url.startsWith("//")) {
-            return "http://$url"
+            return "http:$url"
         }
 
-        // Otherwise, add "http://" to the beginning of the URL
-        return "http://${url}"
+        return "http://$url"
     }
 
     fun getUrls(url: String): List<String> {

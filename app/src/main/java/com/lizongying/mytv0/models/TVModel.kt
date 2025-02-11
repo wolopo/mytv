@@ -8,19 +8,19 @@ import androidx.lifecycle.ViewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.datasource.rtmp.RtmpDataSource
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import com.lizongying.mytv0.IgnoreSSLCertificate
 import com.lizongying.mytv0.SP
 import com.lizongying.mytv0.data.EPG
 import com.lizongying.mytv0.data.Program
 import com.lizongying.mytv0.data.SourceType
 import com.lizongying.mytv0.data.TV
+import com.lizongying.mytv0.requests.HttpClient
 import kotlin.math.max
 import kotlin.math.min
 
@@ -57,11 +57,11 @@ class TVModel(var tv: TV) : ViewModel() {
         _errInfo.value = info
     }
 
-    private var _epg = MutableLiveData<MutableList<EPG>>()
-    val epg: LiveData<MutableList<EPG>>
+    private var _epg = MutableLiveData<List<EPG>>()
+    val epg: LiveData<List<EPG>>
         get() = _epg
 
-    fun setEpg(epg: MutableList<EPG>) {
+    fun setEpg(epg: List<EPG>) {
         _epg.value = epg
     }
 
@@ -119,15 +119,9 @@ class TVModel(var tv: TV) : ViewModel() {
             val path = uri.path ?: return@let null
             val scheme = uri.scheme ?: return@let null
 
-//        val okHttpDataSource = OkHttpDataSource.Factory(HttpClient.okHttpClient)
-//        httpDataSource = okHttpDataSource
-
-            IgnoreSSLCertificate.ignore()
-            val defaultHttpDataSource = DefaultHttpDataSource.Factory()
-            defaultHttpDataSource.setKeepPostFor302Redirects(true)
-            defaultHttpDataSource.setAllowCrossProtocolRedirects(true)
+            val okHttpDataSource = OkHttpDataSource.Factory(HttpClient.okHttpClient)
             tv.headers?.let { i ->
-                defaultHttpDataSource.setDefaultRequestProperties(i)
+                okHttpDataSource.setDefaultRequestProperties(i)
                 i.forEach { (key, value) ->
                     if (key.equals("user-agent", ignoreCase = true)) {
                         userAgent = value
@@ -136,7 +130,7 @@ class TVModel(var tv: TV) : ViewModel() {
                 }
             }
 
-            _httpDataSource = defaultHttpDataSource
+            _httpDataSource = okHttpDataSource
 
             sourceTypeList = if (path.lowercase().endsWith(".m3u8")) {
                 listOf(SourceType.HLS)
